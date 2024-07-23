@@ -1,127 +1,128 @@
 from selenium import webdriver
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.by import By
-from selenium.webdriver.support.select import Select
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
-
-import openpyxl
+import csv
 import time
+import re
+
+# Open the CSV file in append mode
+with open('vets_in_LA.csv', 'a', newline='') as file:
+    writer = csv.writer(file)
+    # Write the headers only if the file is empty
+    if file.tell() == 0:
+        writer.writerow(["Company Name", "Phone Number", "Address"])
+
+chrome_options = webdriver.ChromeOptions()
+chrome_options.add_argument('--ignore-ssl-errors=yes')
+chrome_options.add_argument('--ignore-certificate-errors=yes')
+chrome_options.add_argument("--log-level=3")
+chrome_options.add_argument('--disable-blink-features=AutomationControlled')
+service = Service(ChromeDriverManager().install())
+driver = webdriver.Chrome(service=service, options=chrome_options)
+driver.maximize_window()
+
+def extract_company_info(driver, writer):
+    try:
+        # Get the company's name
+        company_name_element = WebDriverWait(driver, 5).until(
+            EC.presence_of_element_located((By.CLASS_NAME, "y-css-olzveb"))
+        )
+        company_name = company_name_element.text
+
+        # Get the phone number
+        try:
+            phone_number_element = WebDriverWait(driver, 5).until(
+                EC.presence_of_element_located((By.XPATH, "//div[contains(@class, 'y-css-1lfp6nf')]//p[contains(@class, 'y-css-1o34y7f') and contains(text(), '(')]")
+            ))
+            phone_number_text = phone_number_element.text
+            phone_number_match = re.search(r'\(\d{3}\) \d{3}-\d{4}', phone_number_text)
+            phone_number = phone_number_match.group(0) if phone_number_match else "Not found"
+        except:
+            print("Company number not found")
+            phone_number = "num Not found"
+
+        # Get the address
+        try:
+            address_elements = WebDriverWait(driver, 5).until(
+                EC.presence_of_all_elements_located((By.CLASS_NAME, "y-css-dg8xxd"))
+            )
+            address = "address not found"
+            for element in address_elements:
+                if re.search(r'\d{3,}.*', element.text):
+                    address = element.text.strip()
+                    break
+        except:
+            print("Address not found")
+            address = "address not found"
+
+        # Write data to CSV
+        writer.writerow([company_name, phone_number, address])
+        print(f"Company name, number, and address written to vets_in_LA.csv: {company_name}, {phone_number}, {address}")
+
+    except Exception as e:
+        print(f"Error extracting company info: {e}")
 
 try:
-    chrome_options = webdriver.ChromeOptions()
-    service = Service(ChromeDriverManager().install())
-    driver = webdriver.Chrome(service=service, options=chrome_options)
-
     driver.get("https://www.yelp.com")
 
     search_field = driver.find_element(By.ID, "search_description")
     location_field = driver.find_element(By.ID, "search_location")
-    print("located boxes")
-    time.sleep(5)
 
     search_field.clear()
     search_field.send_keys("veterinaries")
     location_field.send_keys(Keys.CONTROL + "a")
     location_field.send_keys(Keys.DELETE)
     location_field.send_keys("Los Angeles, CA")
-    print("inputted keywords")
-    time.sleep(5)
-
 
     location_field.send_keys(Keys.RETURN)
-    print("entered values")
-    time.sleep(10)
+    time.sleep(5)  # Adjust wait time as needed
 
+    visited_urls = set()
+    page_number = 1
 
-except:
-    print("did not work")
-
-"""    1. click on the first company on the list
-        - write the company's name down on excel
-        - write the company's number down on excel
-    2. click back, click on the next company on the list
-        - repeat
-    if end of the list, click on the next page and repeat the process"""
-
-
-
-
-def update_form_field(driver, field_name, field_value):
-    search_bar = driver.find_element(By.ID, field_name)
-    search_bar.clear()
-    time.sleep(1)
-    search_bar.send_keys(field_value)
-
-def extract_and_write_data(driver, sheet):
-    company_name = driver.find_element(By.CSS_SELECTOR, "h1.css-11q1g5y").text
-    phone_number = driver.find_element(By.CSS_SELECTOR, "p.css-8jxw1i").text
-    sheet.append([company_name, phone_number])
-
-# Initialize the Chrome driver
-chrome_options = webdriver.ChromeOptions()
-service = Service(ChromeDriverManager().install())
-driver = webdriver.Chrome(service=service, options=chrome_options)
-
-# Create a new Excel workbook and sheet
-workbook = openpyxl.Workbook()
-sheet = workbook.active
-sheet.title = "Veterinaries in LA"
-sheet.append(["Company Name", "Phone Number"])
-
-try:
-    driver.get("https://www.yelp.com")
-
-    search_field = driver.find_element(By.ID, "find_desc")
-    location_field = driver.find_element(By.ID, "search_location")
-    print("Located search fields")
-
-    time.sleep(5)
-
-    search_field.clear()
-    search_field.send_keys("veterinaries")
-    location_field.send_keys(Keys.CONTROL + "a")
-    location_field.send_keys(Keys.DELETE)
-    location_field.send_keys("Los Angeles, CA")
-    print("Inputted keywords")
-    time.sleep(5)
-
-    location_field.send_keys(Keys.RETURN)
-    print("Entered values")
-    time.sleep(10)
-
-    companies_written = 0
     while True:
-        company_elements = driver.find_elements(By.CSS_SELECTOR, "div.container__09f24__21w3G")
-
-        for company_element in company_elements:
-            if companies_written >= 50:
-                break
-
+        for i in range(13, 24):  # last 2 results in the page
             try:
-                link = company_element.find_element(By.CSS_SELECTOR, "a.css-1422juy")
-                driver.execute_script("arguments[0].click();", link)
-                time.sleep(5)
+                # Find the company link
+                company_link = WebDriverWait(driver, 5).until(
+                    EC.presence_of_element_located((By.XPATH, f'//*[@id="main-content"]/ul/li[{i}]/div/div/div/div[2]/div[1]/div/div[1]/div/div[1]/div/div/h3/a[not(contains(@href, "/url_redacted"))]'))
+                )
+                company_url = company_link.get_attribute('href')
 
-                extract_and_write_data(driver, sheet)
-                companies_written += 1
+                if company_url in visited_urls:
+                    continue
 
-                driver.back()
-                time.sleep(5)
+                visited_urls.add(company_url)
+                driver.get(company_url)
+                time.sleep(3)  # Adjust wait time as needed
+
+                with open('vets_in_LA.csv', 'a', newline='') as file:
+                    writer = csv.writer(file)
+                    extract_company_info(driver, writer)
+                time.sleep(3)
+                # Go back to the search results
+                driver.execute_script("window.history.go(-1)")
+                time.sleep(3)  # Wait for the page to load before continuing
+
             except Exception as e:
+                print(f"Error processing result at index {i}: {e}")
                 continue
 
+        # Click on the next page
         try:
-            next_button = driver.find_element(By.CSS_SELECTOR, "a.next-link.navigation-button__09f24__F_sB2")
-            next_button.click()
-            time.sleep(10)
+            next_page_link = WebDriverWait(driver, 5).until(
+                EC.presence_of_element_located((By.CLASS_NAME, "icon--24-chevron-right-v2"))
+            )
+            next_page_link.click()
+            page_number += 1
+            time.sleep(5)  # Adjust wait time as needed
         except Exception as e:
+            print("No more pages or error navigating to the next page.")
             break
 
-except Exception as e:
-    print(f"Error occurred: {e}")
-
 finally:
-    workbook.save("Veterinaries_in_LA.xlsx")
     driver.quit()
-    print("Process completed and browser closed")
